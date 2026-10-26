@@ -3,7 +3,7 @@ import * as db from './db.js';
 import * as L from './logic.js';
 import * as S from './sync.js';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.1';
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
 
@@ -38,6 +38,8 @@ const ICON = {
   plus: '<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   minus: '<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>',
   camera: '<svg aria-hidden="true" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#E4AE93" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  cameraSmall: '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  gallery: '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>',
   info: '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E4AE93" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
   check: '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
   cloudOff: '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 1l22 22M16.7 16.7A7 7 0 0 1 5 12M8.5 3.6A8 8 0 0 1 19 12M5 12a7 7 0 0 1 .9-3.4"/></svg>',
@@ -533,6 +535,30 @@ function cleanFields(d, keys) {
   return out;
 }
 
+// Zdjęcie etykiety: aparat albo galeria telefonu.
+function photoPicker(previewHtml, hasPhoto) {
+  return `<div class="camera">
+    ${previewHtml}
+    <div class="photo-actions">
+      <label class="btn-outline small-btn">
+        <input type="file" accept="image/*" capture="environment" data-photo="camera" class="sr-only">
+        ${ICON.cameraSmall}${hasPhoto ? 'Reprendre' : 'Appareil photo'}
+      </label>
+      <label class="btn-outline small-btn">
+        <input type="file" accept="image/*" data-photo="gallery" class="sr-only">
+        ${ICON.gallery}Galerie
+      </label>
+    </div>
+  </div>`;
+}
+
+function bindPhotoPicker(form, onFile) {
+  form.querySelectorAll('[data-photo]').forEach((input) => input.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) onFile(file);
+  }));
+}
+
 async function compressImage(file) {
   let source;
   try {
@@ -569,12 +595,9 @@ function screenAjouter() {
   <div class="screen">
     ${topbar('Ajouter un vin', '#/')}
     <form data-form="add" novalidate style="display:flex;flex-direction:column;gap:16px">
-      <label class="camera">
-        <input type="file" accept="image/*" capture="environment" name="photo" class="sr-only">
-        ${a.photoUrl ? `<img src="${a.photoUrl}" alt="Aperçu de l'étiquette"><span class="small muted">Toucher pour reprendre la photo</span>` : `${ICON.camera}
-          <span style="font-size:16px;font-weight:600">Photographier l'étiquette</span>
-          <span style="font-family:var(--serif);font-style:italic;font-size:14px;color:var(--muted)">face avant uniquement</span>`}
-      </label>
+      ${photoPicker(a.photoUrl ? `<img src="${a.photoUrl}" alt="Aperçu de l'étiquette">` : `${ICON.camera}
+          <span style="font-size:16px;font-weight:600">Photo de l'étiquette</span>
+          <span style="font-family:var(--serif);font-style:italic;font-size:14px;color:var(--muted)">face avant uniquement</span>`, Boolean(a.photoUrl))}
       <div class="field"><label for="a-name">Nom du vin</label>
         <input class="input" id="a-name" name="name" type="text" placeholder="Ex. Château La Pierre" value="${esc(d.name)}" autocomplete="off"></div>
       <div class="field"><label for="a-prod">Producteur</label>
@@ -616,9 +639,7 @@ function dupCard(w) {
 function bindAjouter() {
   const form = $('[data-form="add"]');
   const keep = () => { state.add.d = { ...state.add.d, ...readForm(form) }; };
-  form.querySelector('[name="photo"]').addEventListener('change', async (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
+  bindPhotoPicker(form, async (file) => {
     keep();
     const blob = await compressImage(file);
     if (state.add.photoUrl) URL.revokeObjectURL(state.add.photoUrl);
@@ -685,10 +706,7 @@ function screenEdit(id) {
   <div class="screen">
     ${topbar('Modifier', `#/vin/${encodeURIComponent(id)}`)}
     <form data-form="edit" novalidate style="display:flex;flex-direction:column;gap:14px">
-      <label class="camera" style="min-height:96px">
-        <input type="file" accept="image/*" capture="environment" name="photo" class="sr-only">
-        ${e.photoUrl ? `<img src="${e.photoUrl}" alt="Nouvelle photo">` : `${ICON.camera}<span class="small">Changer la photo de l'étiquette</span>`}
-      </label>
+      ${photoPicker(e.photoUrl ? `<img src="${e.photoUrl}" alt="Nouvelle photo">` : `${ICON.camera}<span class="small">Changer la photo de l'étiquette</span>`, Boolean(e.photoUrl))}
       ${field('name', 'Nom du vin')}
       ${field('producer', 'Producteur')}
       <div class="grid2" style="gap:12px">
@@ -728,9 +746,7 @@ function screenEdit(id) {
 function bindEdit(id) {
   const form = $('[data-form="edit"]');
   const keep = () => { state.edit.d = { ...state.edit.d, ...readForm(form) }; };
-  form.querySelector('[name="photo"]').addEventListener('change', async (ev) => {
-    const file = ev.target.files && ev.target.files[0];
-    if (!file) return;
+  bindPhotoPicker(form, async (file) => {
     keep();
     state.edit.photo = await compressImage(file);
     state.edit.photoUrl = URL.createObjectURL(state.edit.photo);
