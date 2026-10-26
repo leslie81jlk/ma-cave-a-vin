@@ -114,7 +114,7 @@ export function colorInfo(w) {
 }
 
 export function displayName(w) {
-  return str(w.name) || str(w.producer) || 'Vin sans nom';
+  return str(w.name) || str(w.producer) || 'Vin à identifier';
 }
 
 // Ligne secondaire: région · appellation millésime

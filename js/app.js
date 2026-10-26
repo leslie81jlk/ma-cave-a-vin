@@ -2,8 +2,9 @@
 import * as db from './db.js';
 import * as L from './logic.js';
 import * as S from './sync.js';
+import * as SC from './scans.js';
 
-const APP_VERSION = '1.0.1';
+const APP_VERSION = '1.0.2';
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
 
@@ -179,6 +180,25 @@ async function photoUrl(id) {
 async function afterChange() {
   state.queueCount = await db.count('queue');
   scheduleSync();
+  scheduleScans();
+}
+
+// Kopie etykiet dla Claude (prywatne repozytorium GitHub).
+let scanTimer = null;
+function scheduleScans() {
+  clearTimeout(scanTimer);
+  if (!SC.enabled() || !navigator.onLine) return;
+  scanTimer = setTimeout(runScans, 1500);
+}
+
+async function runScans() {
+  try {
+    await SC.push();
+    state.scanError = null;
+  } catch (e) {
+    state.scanError = e.message;
+  }
+  if (currentRoute().name === 'parametres') softRender();
 }
 
 // ---------------------------------------------------------------- synchronizacja
@@ -466,6 +486,7 @@ function screenFiche(id) {
       ${info.length ? `<dl class="info">${info.map(([k, v]) => `<div><dt>${k}</dt><dd>${k === 'Prix d\'achat' ? v : esc(v)}</dd></div>`).join('')}
         ${L.str(w.grapes) ? `<div class="full"><dt>Cépages</dt><dd>${esc(w.grapes)}</dd></div>` : ''}</dl>` : ''}
       ${L.str(w.description_fr) ? `<p class="desc">${esc(w.description_fr)}</p>` : ''}
+      ${L.str(w.status_fiche) === 'Complété' && L.str(w.claude_note) ? `<p class="small" style="margin:0;padding:10px 12px;background:var(--bg);border-radius:12px;color:var(--soft)">${esc(w.claude_note)}</p>` : ''}
       <p class="tiny muted" style="margin:0">${L.str(w.status_fiche) === 'Complété' ? 'Complété par Claude' : 'En attente de Claude'}${L.str(w.locked_fields) ? ` · corrigé à la main : ${esc([...L.lockedSet(w)].map((k) => FIELD_LABELS[k] || k).join(', '))}` : ''}</p>
     </section>
   </div>`;
@@ -496,9 +517,9 @@ function readForm(form) {
   return d;
 }
 
-function validate(d) {
+function validate(d, hasPhoto = false) {
   const errs = [];
-  if (!L.str(d.name) && !L.str(d.producer)) errs.push('Indiquez au moins le nom du vin ou le producteur.');
+  if (!L.str(d.name) && !L.str(d.producer) && !hasPhoto) errs.push('Prenez une photo de l\'étiquette ou indiquez le nom du vin.');
   const v = L.num(d.vintage);
   if (L.str(d.vintage) && (v === null || v < 1800 || v > year() + 1)) errs.push('Millésime invalide.');
   const p = L.num(d.purchase_price);
@@ -621,7 +642,7 @@ function screenAjouter() {
       </div>
       ${a.errors.length ? `<p class="form-error" role="alert">${a.errors.map(esc).join(' ')}</p>` : ''}
       ${a.dup ? dupCard(a.dup) : `
-      <div class="note-box">${ICON.info}<span>Région, appellation, cépages et maturité seront complétés par Claude. La fiche est marquée 'À compléter'.</span></div>
+      <div class="note-box">${ICON.info}<span>Une photo de l'étiquette suffit : Claude lira le nom, le producteur et le millésime, puis complétera la fiche. Les champs ci-dessus sont facultatifs.</span></div>
       <button type="submit" class="btn">Enregistrer</button>`}
     </form>
   </div>`;
@@ -678,9 +699,9 @@ function bindAjouter() {
 async function saveNew(force) {
   const a = state.add;
   const fields = cleanFields(a.d, ['name', 'producer', 'vintage', 'is_nv', 'bottle_size_ml', 'purchase_price']);
-  a.errors = validate(a.d);
+  a.errors = validate(a.d, Boolean(a.photo));
   if (a.errors.length) { render(); return; }
-  if (!force) {
+  if (!force && (L.str(fields.name) || L.str(fields.producer))) {
     const key = L.duplicateKey(fields);
     const dup = state.wines.find((w) => L.duplicateKey(w) === key);
     if (dup) { a.dup = dup; render(); return; }
@@ -761,7 +782,7 @@ function bindEdit(id) {
     ev.preventDefault();
     keep();
     const e = state.edit;
-    e.errors = validate(e.d);
+    e.errors = validate(e.d, true);
     if (e.errors.length) { render(); return; }
     const w = byId(id);
     const keys = [...L.USER_FIELDS, ...L.CLAUDE_EDITABLE];
@@ -917,6 +938,18 @@ function screenParametres(extra) {
   <div class="screen">
     ${topbar('Paramètres', '#/')}
     <section class="card" aria-labelledby="p-sync"><h2 class="h2" id="p-sync">Synchronisation</h2>${syncBody}</section>
+    <section class="card" aria-labelledby="p-scan"><h2 class="h2" id="p-scan">Photos pour Claude</h2>
+      <p class="small muted" style="margin:0">Une copie de chaque étiquette est envoyée dans un dépôt GitHub privé, pour que Claude puisse la lire et compléter la fiche.</p>
+      <div class="kv"><span>État</span><span data-slot="scan-status">…</span></div>
+      <form data-form="scans" style="display:flex;flex-direction:column;gap:12px" autocomplete="off">
+        <div class="field"><label for="s-repo">Dépôt privé</label>
+          <input class="input" id="s-repo" name="repo" type="text" value="${esc(SC.config().repo)}" autocapitalize="off" spellcheck="false"></div>
+        <div class="field"><label for="s-token">Jeton d'accès GitHub</label>
+          <input class="input" id="s-token" name="token" type="password" placeholder="${SC.enabled() ? 'Jeton enregistré · laisser vide pour le garder' : 'github_pat_…'}" autocapitalize="off" spellcheck="false"></div>
+        <button type="submit" class="btn-outline">${SC.enabled() ? 'Enregistrer et envoyer' : 'Activer'}</button>
+        ${SC.enabled() ? '<button type="button" class="btn-ghost" data-action="scan-off" style="justify-content:center">Désactiver</button>' : ''}
+      </form>
+    </section>
     <section class="card" aria-labelledby="p-save"><h2 class="h2" id="p-save">Sauvegarde</h2>
       <p class="small muted" style="margin:0">Une copie hors de Google : un fichier .zip avec le tableau Excel et les photos des étiquettes.</p>
       <div class="kv"><span>Dernier export</span><span data-slot="last-export">…</span></div>
@@ -959,6 +992,35 @@ async function bindParametres() {
     render();
   });
   on('[data-action="export"]', exportAll);
+
+  const scanSlot = $('[data-slot="scan-status"]');
+  const n = await SC.pending();
+  scanSlot.textContent = !SC.enabled() ? 'non activé'
+    : state.scanError ? state.scanError
+      : n ? `${plural(n, 'photo', 'photos')} en attente` : 'à jour';
+  if (state.scanError) scanSlot.style.color = 'var(--warn)';
+  $('[data-form="scans"]').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const repo = $('#s-repo').value.trim();
+    const token = $('#s-token').value.trim() || SC.config().token;
+    if (!repo || !token) { toast('Indiquez le dépôt et le jeton.'); return; }
+    try {
+      await SC.test(repo, token);
+      SC.save(repo, token);
+      state.scanError = null;
+      toast('Photos pour Claude activées. Envoi en cours…');
+      render();
+      await runScans();
+      if (!state.scanError) toast('Photos envoyées.');
+    } catch (e) {
+      toast(e.message);
+    }
+  });
+  on('[data-action="scan-off"]', () => {
+    SC.clear();
+    toast('Envoi des photos désactivé.');
+    render();
+  });
 }
 
 function loadScript(src) {
@@ -1069,6 +1131,7 @@ async function start() {
   window.addEventListener('online', () => { scheduleSync(); refreshStatus(); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleSync(); });
   render();
+  scheduleScans();
   if (S.configured() && S.hasToken() && navigator.onLine) runSync(false);
   else if (S.configured() && (await db.getMeta('consented'))) { state.needsLogin = true; refreshStatus(); }
 }

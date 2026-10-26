@@ -57,3 +57,17 @@ Aplikacja widzi wyłącznie te dwa elementy, nic więcej na Twoim Drive.
 ## Aktualizacje aplikacji
 
 Po wgraniu nowych plików zmień numer 'VERSION' w 'sw.js', żeby telefon pobrał nową wersję. Aplikacja odświeży się przy drugim uruchomieniu.
+
+## Photos pour Claude (prywatne repozytorium na zdjęcia)
+
+Zdjęcia na Google Drive widzi tylko aplikacja, dlatego kopia każdej etykiety trafia też do prywatnego repozytorium GitHub, które Claude może czytać.
+
+1. Na github.com utwórz repozytorium 'ma-cave-photos', koniecznie **Private**, z zaznaczoną opcją 'Add a README file'.
+2. Utwórz jeton: zdjęcie profilowe > Settings > Developer settings > Personal access tokens > Fine-grained tokens > Generate new token.
+    - Token name: 'Ma Cave photos', Expiration: 1 rok.
+    - Repository access: 'Only select repositories' > 'ma-cave-photos'.
+    - Permissions > Repository permissions > Contents: 'Read and write'.
+    - Generate token i skopiuj go (zaczyna się od 'github_pat_').
+3. W aplikacji: Paramètres > Photos pour Claude > wklej jeton > 'Activer'. Aplikacja sprawdzi, czy repozytorium jest prywatne, i wyśle zaległe zdjęcia.
+
+Jeton jest zapisany tylko w telefonie i daje dostęp wyłącznie do tego jednego repozytorium.
