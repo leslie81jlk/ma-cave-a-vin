@@ -1,5 +1,5 @@
 // Service worker: aplikacja działa offline. Zapytania do API Google nigdy nie są zapisywane w pamięci podręcznej.
-const VERSION = 'cave-v1.3.0';
+const VERSION = 'cave-v1.4.0';
 const SHELL = [
   './', 'index.html', 'app.css', 'config.js', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/logic.js', 'js/sync.js', 'js/scans.js',

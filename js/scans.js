@@ -102,3 +102,20 @@ export async function fetchPhoto(name) {
   const blob = await r.blob();
   return blob.size ? new Blob([blob], { type: 'image/jpeg' }) : null;
 }
+
+// Zdjęcie do inwentaryzacji: folder import/ (Claude czyta je i tworzy karty). 'ok' albo 'exists'.
+export async function uploadImport(name, blob) {
+  const { repo, token } = config();
+  if (!token) throw new ScanError('config', 'Synchronisation non configurée');
+  const url = `https://api.github.com/repos/${repo}/contents/import/${encodeURIComponent(name)}`;
+  const body = JSON.stringify({ message: `Import ${name}`, content: await toBase64(blob) });
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const r = await fetch(url, { method: 'PUT', headers: { ...headers(token), 'Content-Type': 'application/json' }, body });
+    if (r.ok) return 'ok';
+    if (r.status === 401) throw new ScanError('auth', 'Jeton GitHub refusé');
+    if (r.status === 422) return 'exists';
+    if (r.status !== 409 && r.status < 500) throw new ScanError('http', 'Envoi impossible (GitHub ' + r.status + ')');
+    await new Promise((res) => setTimeout(res, 1000 * (attempt + 1)));
+  }
+  throw new ScanError('http', 'Envoi impossible, réessayez');
+}

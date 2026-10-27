@@ -4,7 +4,7 @@ import * as L from './logic.js';
 import * as S from './sync.js';
 import * as SC from './scans.js';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
 
@@ -714,10 +714,13 @@ function bindPhotoPicker(form, onFile, onMany) {
   }));
 }
 
-async function compressImage(file) {
+async function compressImage(file, max = 1200, quality = 0.72) {
   let source;
   try {
-    source = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    // Duże zdjęcia (50-200 MP): zmniejszenie już przy dekodowaniu, żeby nie zabrakło pamięci.
+    source = max > 1200
+      ? await createImageBitmap(file, { imageOrientation: 'from-image', resizeWidth: max, resizeQuality: 'high' })
+      : await createImageBitmap(file, { imageOrientation: 'from-image' });
   } catch (e) {
     source = await new Promise((resolve, reject) => {
       const img = new Image();
@@ -726,7 +729,6 @@ async function compressImage(file) {
       img.src = URL.createObjectURL(file);
     });
   }
-  const max = 1200;
   const sw = source.width;
   const sh = source.height;
   const k = Math.min(1, max / Math.max(sw, sh));
@@ -734,7 +736,62 @@ async function compressImage(file) {
   canvas.width = Math.round(sw * k);
   canvas.height = Math.round(sh * k);
   canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
-  return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.72));
+  return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/jpeg', quality));
+}
+
+// ---------------------------------------------------------------- Inventaire par photos (import/)
+function importName(file) {
+  const base = String(file.name || 'photo').replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_-]+/g, '_') || 'photo';
+  return `${base}.jpg`;
+}
+
+function screenImport() {
+  const im = state.imp;
+  const ready = SC.enabled();
+  const progress = im ? `<div class="card" role="status">
+      <p style="margin:0"><strong>${im.done + im.skipped} / ${im.total}</strong> ${im.running ? 'envoi en cours…' : 'terminé'}</p>
+      <div class="bar"><span style="width:${im.total ? Math.round(100 * (im.done + im.skipped) / im.total) : 0}%"></span></div>
+      ${im.skipped ? `<p class="small muted" style="margin:0">${plural(im.skipped, 'photo déjà envoyée, ignorée', 'photos déjà envoyées, ignorées')}.</p>` : ''}
+      ${im.failed.length ? `<p class="small" style="margin:0;color:var(--warn)">${plural(im.failed.length, 'échec', 'échecs')} : ${esc(im.failed.slice(0, 5).join(', '))}${im.failed.length > 5 ? '…' : ''}. Choisissez-les à nouveau.</p>` : ''}
+      ${!im.running && !im.failed.length ? `<p class="small" style="margin:0">Demandez maintenant à Claude : 'Importe les photos'.</p>` : ''}
+      ${im.running ? `<p class="tiny muted" style="margin:0">Gardez l'application ouverte jusqu'à la fin.</p>` : ''}
+    </div>` : '';
+  return `
+  <div class="screen">
+    ${topbar('Inventaire par photos', '#/ajouter')}
+    <p class="small muted" style="margin:0">Pour Claude : photos de 3 à 5 bouteilles, d'abord l'avant puis l'arrière du même groupe. Les photos sont réduites puis envoyées dans le dossier import du dépôt. Claude crée les fiches.</p>
+    ${ready ? `<label class="btn" style="cursor:pointer"${im && im.running ? ' aria-disabled="true"' : ''}>
+        <input type="file" accept="image/*" multiple data-import class="sr-only"${im && im.running ? ' disabled' : ''}>${ICON.gallery}&nbsp;Choisir les photos</label>`
+      : `<div class="banner">${ICON.info}<span>Configurez d'abord la synchronisation GitHub dans <a href="#/parametres">Paramètres</a>.</span></div>`}
+    ${progress}
+  </div>`;
+}
+
+function bindImport() {
+  const input = $('[data-import]');
+  if (!input) return;
+  input.addEventListener('change', async (e) => {
+    const files = [...e.target.files].sort((a, b) => importName(a).localeCompare(importName(b)));
+    if (!files.length) return;
+    state.imp = { total: files.length, done: 0, skipped: 0, failed: [], running: true };
+    render();
+    for (const f of files) {
+      const name = importName(f);
+      try {
+        // Zwykłe zdjęcia JPEG (kilka MB) idą w oryginale; tylko bardzo duże są zmniejszane.
+        const blob = /jpe?g/i.test(f.type) && f.size < 15e6 ? f : await compressImage(f, 3000, 0.86);
+        const r = await SC.uploadImport(name, blob);
+        if (r === 'exists') state.imp.skipped += 1; else state.imp.done += 1;
+      } catch (err) {
+        state.imp.failed.push(name);
+        if (err && err.code === 'auth') { toast('Jeton GitHub refusé'); break; }
+      }
+      if (currentRoute().name === 'import') render();
+    }
+    state.imp.running = false;
+    if (currentRoute().name === 'import') render();
+    else toast(`Inventaire : ${plural(state.imp.done, 'photo envoyée', 'photos envoyées')}`);
+  });
 }
 
 // ---------------------------------------------------------------- Ajouter un vin
@@ -750,6 +807,7 @@ function screenAjouter() {
   <div class="screen">
     ${topbar('Ajouter un vin', '#/')}
     <a class="banner" href="#/lot">${ICON.gallery}<span style="flex:1"><strong>Plusieurs vins à la fois</strong><br><span class="small">Choisir plusieurs photos ou photographier en série</span></span>${ICON.chevron}</a>
+    <a class="banner" href="#/import">${ICON.gallery}<span style="flex:1"><strong>Inventaire par photos</strong><br><span class="small">Groupes de bouteilles, avant et arrière, pour Claude</span></span>${ICON.chevron}</a>
     <form data-form="add" novalidate style="display:flex;flex-direction:column;gap:16px">
       ${photoPicker(a.photoUrl ? `<img src="${a.photoUrl}" alt="Aperçu de l'étiquette">` : `${ICON.camera}
           <span style="font-size:16px;font-weight:600">Photo de l'étiquette</span>
@@ -1330,6 +1388,7 @@ function currentRoute() {
   if (a === 'vin' && b) return { name: 'fiche', id: b };
   if (a === 'ajouter') return { name: 'ajouter' };
   if (a === 'lot') return { name: 'lot' };
+  if (a === 'import') return { name: 'import' };
   if (a === 'retirer') return { name: 'retirer', id: b };
   if (a === 'stats') return { name: 'stats' };
   if (a === 'parametres') return { name: 'parametres' };
@@ -1356,6 +1415,7 @@ function render() {
     edit: [() => screenEdit(r.id), () => bindEdit(r.id)],
     ajouter: [screenAjouter, bindAjouter],
     lot: [screenLot, bindLot],
+    import: [screenImport, bindImport],
     retirer: [() => screenRetirer(r.id), bindRetirer],
     stats: [screenStats, () => {}],
     parametres: [() => screenParametres(), bindParametres]
