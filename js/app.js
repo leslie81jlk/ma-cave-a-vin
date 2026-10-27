@@ -4,7 +4,7 @@ import * as L from './logic.js';
 import * as S from './sync.js';
 import * as SC from './scans.js';
 
-const APP_VERSION = '1.0.2';
+const APP_VERSION = '1.0.3';
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
 
@@ -615,6 +615,7 @@ function screenAjouter() {
   return `
   <div class="screen">
     ${topbar('Ajouter un vin', '#/')}
+    <a class="banner" href="#/lot">${ICON.gallery}<span style="flex:1"><strong>Plusieurs vins à la fois</strong><br><span class="small">Choisir plusieurs photos ou photographier en série</span></span>${ICON.chevron}</a>
     <form data-form="add" novalidate style="display:flex;flex-direction:column;gap:16px">
       ${photoPicker(a.photoUrl ? `<img src="${a.photoUrl}" alt="Aperçu de l'étiquette">` : `${ICON.camera}
           <span style="font-size:16px;font-weight:600">Photo de l'étiquette</span>
@@ -694,6 +695,138 @@ function bindAjouter() {
     });
     $('[data-action="dup-new"]').addEventListener('click', () => saveNew(true));
   }
+}
+
+// ---------------------------------------------------------------- Ajout par lot
+// Lista zdjęć jest zapisywana w bazie telefonu: przetrwa zamknięcie aplikacji przez system podczas robienia zdjęć.
+const lot = { items: null, urls: new Map(), busy: 0 };
+
+async function lotLoad() {
+  if (!lot.items) lot.items = (await db.getMeta('lot')) || [];
+}
+
+async function lotSave() {
+  await db.setMeta('lot', lot.items);
+}
+
+function lotUrl(item) {
+  if (!lot.urls.has(item.key)) lot.urls.set(item.key, URL.createObjectURL(item.blob));
+  return lot.urls.get(item.key);
+}
+
+function lotClearUrls() {
+  lot.urls.forEach((u) => URL.revokeObjectURL(u));
+  lot.urls.clear();
+}
+
+function screenLot() {
+  return `
+  <div class="screen">
+    ${topbar('Plusieurs vins', '#/ajouter')}
+    <p class="small muted" style="margin:0">Une photo par vin. Claude lira les étiquettes et complétera les fiches. Si deux photos montrent le même vin, il les fusionnera.</p>
+    <div class="grid2">
+      <label class="btn-outline" style="cursor:pointer;white-space:nowrap;padding:0 12px">
+        <input type="file" accept="image/*" multiple data-lot="gallery" class="sr-only">${ICON.gallery}Galerie
+      </label>
+      <label class="btn-outline" style="cursor:pointer;white-space:nowrap;padding:0 12px">
+        <input type="file" accept="image/*" capture="environment" data-lot="camera" class="sr-only">${ICON.cameraSmall}<span data-slot="cam-label">Appareil photo</span>
+      </label>
+    </div>
+    <div data-slot="lot-busy"></div>
+    <div class="list" data-slot="lot-list"></div>
+    <div data-slot="lot-save"></div>
+  </div>`;
+}
+
+function renderLotParts() {
+  const items = lot.items || [];
+  const busy = $('[data-slot="lot-busy"]');
+  if (busy) busy.innerHTML = lot.busy ? `<p class="small muted" style="margin:0" role="status">Préparation de ${plural(lot.busy, 'photo', 'photos')}…</p>` : '';
+  const cam = $('[data-slot="cam-label"]');
+  if (cam) cam.textContent = items.length ? 'Photo suivante' : 'Appareil photo';
+  const list = $('[data-slot="lot-list"]');
+  if (!list) return;
+  list.innerHTML = items.length ? items.map((it, i) => `
+    <div class="wrow" style="align-items:center">
+      <img src="${lotUrl(it)}" alt="Étiquette ${i + 1}" style="width:52px;height:68px;object-fit:cover;border-radius:10px;flex:none">
+      <span class="body"><span class="name">Vin ${i + 1}</span></span>
+      <span class="stepper round" role="group" aria-label="Bouteilles, vin ${i + 1}" style="flex:none">
+        <button type="button" data-lstep="-1" data-i="${i}" aria-label="Une de moins"${it.count <= 1 ? ' disabled' : ''}>−</button>
+        <output>${it.count}</output>
+        <button type="button" data-lstep="1" data-i="${i}" aria-label="Une de plus">+</button>
+      </span>
+      <button type="button" class="icon-btn" data-ldel="${i}" aria-label="Retirer la photo ${i + 1}" style="width:36px;height:36px">×</button>
+    </div>`).join('')
+    : `<div class="empty"><p class="small">Aucune photo pour l'instant.</p></div>`;
+  const total = items.reduce((s, it) => s + it.count, 0);
+  $('[data-slot="lot-save"]').innerHTML = items.length ? `
+    <button type="button" class="btn" data-action="lot-save" style="width:100%"${lot.busy ? ' disabled' : ''}>Enregistrer ${plural(items.length, 'vin', 'vins')} · ${plural(total, 'bouteille', 'bouteilles')}</button>
+    <button type="button" class="btn-ghost" data-action="lot-clear" style="width:100%;justify-content:center;margin-top:10px">Tout effacer</button>` : '';
+  $$('[data-lstep]').forEach((b) => b.addEventListener('click', async () => {
+    const it = lot.items[Number(b.dataset.i)];
+    it.count = Math.max(1, it.count + Number(b.dataset.lstep));
+    await lotSave();
+    renderLotParts();
+  }));
+  $$('[data-ldel]').forEach((b) => b.addEventListener('click', async () => {
+    const [it] = lot.items.splice(Number(b.dataset.ldel), 1);
+    if (lot.urls.has(it.key)) { URL.revokeObjectURL(lot.urls.get(it.key)); lot.urls.delete(it.key); }
+    await lotSave();
+    renderLotParts();
+  }));
+  const save = $('[data-action="lot-save"]');
+  if (save) save.addEventListener('click', saveLot);
+  const clear = $('[data-action="lot-clear"]');
+  if (clear) clear.addEventListener('click', async () => {
+    lot.items = [];
+    lotClearUrls();
+    await lotSave();
+    renderLotParts();
+  });
+}
+
+async function addLotFiles(files) {
+  const list = [...files];
+  lot.busy += list.length;
+  renderLotParts();
+  for (const f of list) {
+    try {
+      const blob = await compressImage(f);
+      lot.items.push({ key: crypto.randomUUID(), blob, count: 1 });
+      await lotSave();
+    } catch (e) {
+      toast('Une photo n\'a pas pu être lue.');
+    }
+    lot.busy -= 1;
+    if (currentRoute().name === 'lot') renderLotParts();
+  }
+}
+
+async function bindLot() {
+  await lotLoad();
+  if (currentRoute().name !== 'lot') return;
+  renderLotParts();
+  $$('[data-lot]').forEach((input) => input.addEventListener('change', (e) => {
+    const files = e.target.files;
+    if (files && files.length) addLotFiles(files);
+    e.target.value = '';
+  }));
+}
+
+async function saveLot() {
+  const items = lot.items.slice();
+  if (!items.length || lot.busy) return;
+  const btn = $('[data-action="lot-save"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
+  for (const it of items) {
+    await createWine(cleanFields({ bottle_size_ml: '750' }, ['bottle_size_ml']), it.count, it.blob);
+  }
+  state.wines = await db.getAll('wines');
+  lot.items = [];
+  lotClearUrls();
+  await lotSave();
+  toast(`${plural(items.length, 'vin ajouté', 'vins ajoutés')}. Demandez à Claude : 'Mets à jour ma cave'.`, null, null, 8000);
+  location.hash = '#/cave';
 }
 
 async function saveNew(force) {
@@ -1078,6 +1211,7 @@ function currentRoute() {
   if (a === 'vin' && b && c === 'modifier') return { name: 'edit', id: b };
   if (a === 'vin' && b) return { name: 'fiche', id: b };
   if (a === 'ajouter') return { name: 'ajouter' };
+  if (a === 'lot') return { name: 'lot' };
   if (a === 'retirer') return { name: 'retirer', id: b };
   if (a === 'stats') return { name: 'stats' };
   if (a === 'parametres') return { name: 'parametres' };
@@ -1099,6 +1233,7 @@ function render() {
     fiche: [() => screenFiche(r.id), () => bindFiche(r.id)],
     edit: [() => screenEdit(r.id), () => bindEdit(r.id)],
     ajouter: [screenAjouter, bindAjouter],
+    lot: [screenLot, bindLot],
     retirer: [() => screenRetirer(r.id), bindRetirer],
     stats: [screenStats, () => {}],
     parametres: [() => screenParametres(), bindParametres]
