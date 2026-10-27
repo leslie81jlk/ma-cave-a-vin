@@ -4,7 +4,7 @@ import * as L from './logic.js';
 import * as S from './sync.js';
 import * as SC from './scans.js';
 
-const APP_VERSION = '1.0.3';
+const APP_VERSION = '1.0.4';
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
 
@@ -557,7 +557,7 @@ function cleanFields(d, keys) {
 }
 
 // Zdjęcie etykiety: aparat albo galeria telefonu.
-function photoPicker(previewHtml, hasPhoto) {
+function photoPicker(previewHtml, hasPhoto, multiple = false) {
   return `<div class="camera">
     ${previewHtml}
     <div class="photo-actions">
@@ -566,17 +566,19 @@ function photoPicker(previewHtml, hasPhoto) {
         ${ICON.cameraSmall}${hasPhoto ? 'Reprendre' : 'Appareil photo'}
       </label>
       <label class="btn-outline small-btn">
-        <input type="file" accept="image/*" data-photo="gallery" class="sr-only">
+        <input type="file" accept="image/*" data-photo="gallery" class="sr-only"${multiple ? ' multiple' : ''}>
         ${ICON.gallery}Galerie
       </label>
     </div>
   </div>`;
 }
 
-function bindPhotoPicker(form, onFile) {
+function bindPhotoPicker(form, onFile, onMany) {
   form.querySelectorAll('[data-photo]').forEach((input) => input.addEventListener('change', (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (file) onFile(file);
+    const files = e.target.files ? [...e.target.files] : [];
+    if (files.length > 1 && onMany) onMany(files);
+    else if (files[0]) onFile(files[0]);
+    e.target.value = '';
   }));
 }
 
@@ -619,7 +621,7 @@ function screenAjouter() {
     <form data-form="add" novalidate style="display:flex;flex-direction:column;gap:16px">
       ${photoPicker(a.photoUrl ? `<img src="${a.photoUrl}" alt="Aperçu de l'étiquette">` : `${ICON.camera}
           <span style="font-size:16px;font-weight:600">Photo de l'étiquette</span>
-          <span style="font-family:var(--serif);font-style:italic;font-size:14px;color:var(--muted)">face avant uniquement</span>`, Boolean(a.photoUrl))}
+          <span style="font-family:var(--serif);font-style:italic;font-size:14px;color:var(--muted)">face avant uniquement</span>`, Boolean(a.photoUrl), true)}
       <div class="field"><label for="a-name">Nom du vin</label>
         <input class="input" id="a-name" name="name" type="text" placeholder="Ex. Château La Pierre" value="${esc(d.name)}" autocomplete="off"></div>
       <div class="field"><label for="a-prod">Producteur</label>
@@ -643,7 +645,7 @@ function screenAjouter() {
       </div>
       ${a.errors.length ? `<p class="form-error" role="alert">${a.errors.map(esc).join(' ')}</p>` : ''}
       ${a.dup ? dupCard(a.dup) : `
-      <div class="note-box">${ICON.info}<span>Une photo de l'étiquette suffit : Claude lira le nom, le producteur et le millésime, puis complétera la fiche. Les champs ci-dessus sont facultatifs.</span></div>
+      <div class="note-box">${ICON.info}<span>Une photo de l'étiquette suffit : Claude lira le nom, le producteur et le millésime, puis complétera la fiche. Dans la galerie, vous pouvez choisir plusieurs photos : une fiche par photo.</span></div>
       <button type="submit" class="btn">Enregistrer</button>`}
     </form>
   </div>`;
@@ -668,6 +670,16 @@ function bindAjouter() {
     state.add.photo = blob;
     state.add.photoUrl = URL.createObjectURL(blob);
     render();
+  }, async (files) => {
+    // Plusieurs photos : une fiche par photo, via l'écran d'ajout par lot.
+    await lotLoad();
+    const a = state.add;
+    if (a && a.photo) lot.items.push({ key: crypto.randomUUID(), blob: a.photo, count: a.count || 1 });
+    if (a && a.photoUrl) URL.revokeObjectURL(a.photoUrl);
+    state.add = null;
+    await lotSave();
+    location.hash = '#/lot';
+    addLotFiles(files);
   });
   form.querySelector('[name="is_nv"]').addEventListener('change', () => { keep(); render(); });
   $$('[data-step]').forEach((b) => b.addEventListener('click', () => {
@@ -691,7 +703,7 @@ function bindAjouter() {
       if (photo) await setPhoto(w.id, photo);
       state.add = null;
       toast(`${plural(n, 'bouteille ajoutée', 'bouteilles ajoutées')} au stock`);
-      location.hash = `#/vin/${encodeURIComponent(w.id)}`;
+      location.hash = '#/';
     });
     $('[data-action="dup-new"]').addEventListener('click', () => saveNew(true));
   }
@@ -826,7 +838,7 @@ async function saveLot() {
   lotClearUrls();
   await lotSave();
   toast(`${plural(items.length, 'vin ajouté', 'vins ajoutés')}. Demandez à Claude : 'Mets à jour ma cave'.`, null, null, 8000);
-  location.hash = '#/cave';
+  location.hash = '#/';
 }
 
 async function saveNew(force) {
@@ -843,8 +855,8 @@ async function saveNew(force) {
   state.wines = await db.getAll('wines');
   if (a.photoUrl) URL.revokeObjectURL(a.photoUrl);
   state.add = null;
-  toast('Vin ajouté. Claude complétera la fiche.');
-  location.hash = `#/vin/${encodeURIComponent(w.id)}`;
+  toast(`${L.displayName(w)} ajouté. Claude complétera la fiche.`);
+  location.hash = '#/';
 }
 
 // ---------------------------------------------------------------- Modifier
