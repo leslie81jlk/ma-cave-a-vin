@@ -4,7 +4,7 @@ import * as L from './logic.js';
 import * as S from './sync.js';
 import * as SC from './scans.js';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.4.1';
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
 
@@ -591,12 +591,13 @@ function screenFiche(id) {
       <button type="button" class="icon-btn" data-action="plus1" aria-label="Ajouter une bouteille" style="color:var(--accent)">${ICON.plus}</button>
       <a class="btn small-btn" href="#/retirer/${encodeURIComponent(w.id)}">Retirer</a>
     </div>
-    <section class="card" aria-labelledby="mat-h">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
-        <h2 class="h2" id="mat-h">Maturité</h2>
-        <span class="pill${m.beyond ? ' warn' : m.score ? '' : ' dim'}">${m.score ? `${m.beyond ? '' : `${m.score}/5 · `}` : ''}${esc(m.label)}</span>
-      </div>
-      ${matBody}
+    <section class="card" aria-labelledby="info-h">
+      <h2 class="h2" id="info-h">Informations</h2>
+      ${info.length ? `<dl class="info">${info.map(([k, v]) => `<div><dt>${k}</dt><dd>${k === 'Prix d\'achat' ? v : esc(v)}</dd></div>`).join('')}
+        ${L.str(w.grapes) ? `<div class="full"><dt>Cépages</dt><dd>${esc(w.grapes)}</dd></div>` : ''}</dl>` : ''}
+      ${L.str(w.description_fr) ? `<p class="desc">${esc(w.description_fr)}</p>` : ''}
+      ${L.str(w.status_fiche) === 'Complété' && L.str(w.claude_note) ? `<p class="small" style="margin:0;padding:10px 12px;background:var(--bg);border-radius:12px;color:var(--soft)">${esc(w.claude_note)}</p>` : ''}
+      <p class="tiny muted" style="margin:0">${L.str(w.status_fiche) === 'Complété' ? 'Complété par Claude' : 'En attente de Claude'}${L.str(w.locked_fields) ? ` · corrigé à la main : ${esc([...L.lockedSet(w)].map((k) => FIELD_LABELS[k] || k).join(', '))}` : ''}</p>
     </section>
     <section class="card" aria-labelledby="avis-h">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
@@ -605,13 +606,12 @@ function screenFiche(id) {
       </div>
       ${L.str(w.personal_notes) ? `<p class="notes">${esc(w.personal_notes)}</p>` : `<p class="small muted" style="margin:0">Pas encore de note. <a href="#/vin/${encodeURIComponent(w.id)}/modifier">Ajouter mon avis</a></p>`}
     </section>
-    <section class="card" aria-labelledby="info-h">
-      <h2 class="h2" id="info-h">Informations</h2>
-      ${info.length ? `<dl class="info">${info.map(([k, v]) => `<div><dt>${k}</dt><dd>${k === 'Prix d\'achat' ? v : esc(v)}</dd></div>`).join('')}
-        ${L.str(w.grapes) ? `<div class="full"><dt>Cépages</dt><dd>${esc(w.grapes)}</dd></div>` : ''}</dl>` : ''}
-      ${L.str(w.description_fr) ? `<p class="desc">${esc(w.description_fr)}</p>` : ''}
-      ${L.str(w.status_fiche) === 'Complété' && L.str(w.claude_note) ? `<p class="small" style="margin:0;padding:10px 12px;background:var(--bg);border-radius:12px;color:var(--soft)">${esc(w.claude_note)}</p>` : ''}
-      <p class="tiny muted" style="margin:0">${L.str(w.status_fiche) === 'Complété' ? 'Complété par Claude' : 'En attente de Claude'}${L.str(w.locked_fields) ? ` · corrigé à la main : ${esc([...L.lockedSet(w)].map((k) => FIELD_LABELS[k] || k).join(', '))}` : ''}</p>
+    <section class="card" aria-labelledby="mat-h">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+        <h2 class="h2" id="mat-h">Maturité</h2>
+        <span class="pill${m.beyond ? ' warn' : m.score ? '' : ' dim'}">${m.score ? `${m.beyond ? '' : `${m.score}/5 · `}` : ''}${esc(m.label)}</span>
+      </div>
+      ${matBody}
     </section>
   </div>`;
 }
