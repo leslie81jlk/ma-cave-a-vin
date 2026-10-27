@@ -4,7 +4,7 @@ import * as L from './logic.js';
 import * as S from './sync.js';
 import * as SC from './scans.js';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
 
@@ -169,13 +169,96 @@ async function setPhoto(id, blob) {
   await afterChange();
 }
 
-async function photoUrl(id) {
+const missingPhotos = new Set();
+// Zdjęcie z telefonu, a gdy go brak: pobrane raz z repozytorium (scans/) i zapisane w telefonie.
+async function photoUrl(id, file) {
   if (state.photoCache.has(id)) return state.photoCache.get(id);
-  const p = await db.get('photos', id);
+  let p = await db.get('photos', id);
+  // Nowsze zdjęcie w repozytorium (inna nazwa pliku niż kopia w telefonie): pobierz je.
+  const stale = p && p.blob && file && (p.file || `${id}.jpg`) !== file;
+  if ((!p || !p.blob || stale) && file && !missingPhotos.has(file) && navigator.onLine) {
+    const blob = await SC.fetchPhoto(file).catch(() => null);
+    if (blob) {
+      p = { id, blob, uploaded: true, scanned: true, file };
+      await db.put('photos', p);
+    } else if (navigator.onLine) missingPhotos.add(file);
+  }
   if (!p || !p.blob) return null;
   const url = URL.createObjectURL(p.blob);
   state.photoCache.set(id, url);
   return url;
+}
+
+// Powiększenie etykiety: szczypanie, przesuwanie, podwójne dotknięcie.
+function openViewer(pages) {
+  const ov = document.createElement('div');
+  ov.className = 'viewer';
+  ov.setAttribute('role', 'dialog');
+  ov.setAttribute('aria-label', 'Étiquette agrandie');
+  ov.innerHTML = `<div class="viewer-bar">
+      <div class="viewer-tabs">${pages.length > 1 ? pages.map((pg, i) => `<button type="button" class="tab" data-vpage="${i}" aria-selected="${i === 0}">${pg.label}</button>`).join('') : ''}</div>
+      <button type="button" class="icon-btn" data-vclose aria-label="Fermer">×</button></div>
+    <div class="viewer-stage"><img alt=""></div>`;
+  document.body.appendChild(ov);
+  const img = ov.querySelector('img');
+  let z = 1, x = 0, y = 0;
+  const pts = new Map();
+  let start = null, lastTap = 0;
+  const apply = () => { img.style.transform = `translate(${x}px, ${y}px) scale(${z})`; };
+  const show = (i) => {
+    img.src = pages[i].url; img.alt = pages[i].label; z = 1; x = 0; y = 0; apply();
+    ov.querySelectorAll('[data-vpage]').forEach((b) => b.setAttribute('aria-selected', String(Number(b.dataset.vpage) === i)));
+  };
+  show(0);
+  const stage = ov.querySelector('.viewer-stage');
+  const snapshot = () => {
+    const a = [...pts.values()];
+    const c = a.length > 1 ? { x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 } : a[0];
+    const d = a.length > 1 ? Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) : 0;
+    start = { c, d, z, x, y };
+  };
+  stage.addEventListener('pointerdown', (e) => {
+    stage.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    snapshot();
+    if (pts.size === 1) {
+      const now = Date.now();
+      if (now - lastTap < 300) {
+        const r = stage.getBoundingClientRect();
+        const cx = e.clientX - r.left - r.width / 2, cy = e.clientY - r.top - r.height / 2;
+        if (z > 1) { z = 1; x = 0; y = 0; } else { z = 2.5; x = -cx * 1.5; y = -cy * 1.5; }
+        apply(); lastTap = 0; snapshot();
+      } else lastTap = now;
+    }
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const a = [...pts.values()];
+    if (a.length > 1 && start.d) {
+      const c = { x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 };
+      const d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
+      const r = stage.getBoundingClientRect();
+      const nz = Math.min(6, Math.max(1, start.z * d / start.d));
+      const ox = start.c.x - r.left - r.width / 2, oy = start.c.y - r.top - r.height / 2;
+      x = ox - (ox - start.x) * nz / start.z + (c.x - start.c.x);
+      y = oy - (oy - start.y) * nz / start.z + (c.y - start.c.y);
+      z = nz;
+    } else if (z > 1) {
+      x = start.x + a[0].x - start.c.x; y = start.y + a[0].y - start.c.y;
+    }
+    apply();
+  });
+  const up = (e) => { pts.delete(e.pointerId); if (z <= 1.01) { z = 1; x = 0; y = 0; apply(); } if (pts.size) snapshot(); };
+  stage.addEventListener('pointerup', up);
+  stage.addEventListener('pointercancel', up);
+  ov.querySelectorAll('[data-vpage]').forEach((b) => b.addEventListener('click', () => show(Number(b.dataset.vpage))));
+  const close = () => { window.removeEventListener('popstate', onPop); ov.remove(); };
+  const onPop = () => close();
+  history.pushState({ viewer: true }, '');
+  window.addEventListener('popstate', onPop);
+  ov.querySelector('[data-vclose]').addEventListener('click', () => history.back());
+  ov.querySelector('[data-vclose]').focus();
 }
 
 async function afterChange() {
@@ -536,9 +619,17 @@ function screenFiche(id) {
 async function bindFiche(id) {
   const w = byId(id);
   if (!w) return;
-  const url = await photoUrl(id);
+  const url = await photoUrl(id, L.str(w.photo_file));
   const slot = $('[data-slot="photo"]');
-  if (url && slot) slot.innerHTML = `<img src="${url}" alt="Étiquette de ${esc(L.displayName(w))}">`;
+  if (url && slot) {
+    slot.innerHTML = `<button type="button" class="photo-zoom" aria-label="Agrandir l'étiquette"><img src="${url}" alt="Étiquette de ${esc(L.displayName(w))}"></button>`;
+    slot.querySelector('button').addEventListener('click', async () => {
+      const pages = [{ label: 'Avant', url }];
+      const back = await photoUrl(`${id}-dos`, `${id}-dos.jpg`);
+      if (back) pages.push({ label: 'Arrière', url: back });
+      openViewer(pages);
+    });
+  }
   $('[data-action="plus1"]').addEventListener('click', async () => {
     const ch = await changeQty(id, 1);
     render();

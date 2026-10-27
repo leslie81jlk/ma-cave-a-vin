@@ -91,3 +91,14 @@ async function doPush() {
   }
   return sent;
 }
+
+// Pobiera zdjęcie z folderu scans/ (np. etykiety wycięte przez Claude). null, gdy brak.
+export async function fetchPhoto(name) {
+  const { repo, token } = config();
+  if (!token || !navigator.onLine) return null;
+  const r = await fetch(`https://api.github.com/repos/${repo}/contents/scans/${encodeURIComponent(name)}`,
+    { headers: { ...headers(token), Accept: 'application/vnd.github.raw' }, cache: 'no-store' });
+  if (!r.ok) return null;
+  const blob = await r.blob();
+  return blob.size ? new Blob([blob], { type: 'image/jpeg' }) : null;
+}
