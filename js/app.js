@@ -4,7 +4,7 @@ import * as L from './logic.js';
 import * as S from './sync.js';
 import * as SC from './scans.js';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
 
@@ -15,7 +15,8 @@ const state = {
   syncing: false,
   syncError: null,
   needsLogin: false,
-  cave: { q: '', inStock: true, color: '', country: '', region: '', mat: '', sort: 'maturity' },
+  cave: { q: '', inStock: true, color: '', tab: 'France', region: '', mat: '', sort: 'maturity' },
+  caveScroll: 0,
   add: null,
   retirer: { q: '', sel: null, n: 1 },
   edit: null,
@@ -345,7 +346,6 @@ function filteredWines() {
   const list = state.wines.filter((w) => {
     if (c.inStock && L.qty(w) === 0) return false;
     if (c.color && L.str(w.color).toLowerCase() !== c.color) return false;
-    if (c.country && L.str(w.country) !== c.country) return false;
     if (c.region && L.str(w.region) !== c.region) return false;
     if (c.mat) {
       const m = L.maturity(w);
@@ -355,6 +355,18 @@ function filteredWines() {
     return L.matchesQuery(w, c.q);
   });
   return L.sortWines(list, c.sort);
+}
+
+const NO_COUNTRY = 'Pays à préciser';
+const NO_REGION = 'Région à préciser';
+const countryOf = (w) => L.str(w.country) || NO_COUNTRY;
+
+// Zakładki krajów: Francja pierwsza, potem alfabetycznie, wina bez kraju na końcu.
+function countryTabs(list) {
+  const counts = new Map();
+  list.forEach((w) => counts.set(countryOf(w), (counts.get(countryOf(w)) || 0) + 1));
+  const rank = (k) => (k === 'France' ? 0 : k === NO_COUNTRY ? 2 : 1);
+  return [...counts.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0], 'fr'));
 }
 
 function selectChip(name, label, value, options) {
@@ -379,7 +391,6 @@ function screenCave() {
     <div class="wrap" role="group" aria-label="Filtres">
       <button type="button" class="chip" data-action="instock" aria-pressed="${c.inStock}">En stock</button>
       ${selectChip('color', 'Couleur', c.color, colors)}
-      ${selectChip('country', 'Pays', c.country, uniqueSorted('country').map((x) => [x, x]))}
       ${selectChip('region', 'Région', c.region, uniqueSorted('region').map((x) => [x, x]))}
       ${selectChip('mat', 'Maturité', c.mat, mats)}
     </div>
@@ -387,6 +398,7 @@ function screenCave() {
       <span class="sort-label" id="sort-l">Trier par</span>
       ${sorts.map(([k, l]) => `<button type="button" class="sort-btn" data-sort="${k}" aria-pressed="${c.sort === k}">${l}</button>`).join('')}
     </div>
+    <div class="tabs" role="tablist" aria-label="Pays" data-slot="tabs"></div>
     <div class="list" data-slot="list"></div>
   </div>`;
 }
@@ -402,13 +414,42 @@ function renderCaveList() {
   } else if (!list.length) {
     slot.innerHTML = `<div class="empty"><p class="small">Aucun vin ne correspond à ces critères.</p></div>`;
   } else {
-    slot.innerHTML = list.map((w) => wineRow(w)).join('');
+    const tabs = countryTabs(list);
+    if (!tabs.some(([k]) => k === state.cave.tab)) state.cave.tab = tabs[0][0];
+    const tab = state.cave.tab;
+    const tabSlot = $('[data-slot="tabs"]');
+    if (tabSlot) {
+      tabSlot.innerHTML = tabs.map(([k, n]) => `<button type="button" class="tab" role="tab" data-tab="${esc(k)}" aria-selected="${k === tab}">${esc(k)} <span class="n">${n}</span></button>`).join('');
+    }
+    const rows = list.filter((w) => countryOf(w) === tab);
+    if (count) count.textContent = plural(rows.length, 'vin', 'vins');
+    if (tab === 'France') {
+      const groups = new Map();
+      rows.forEach((w) => {
+        const r = L.str(w.region) || NO_REGION;
+        if (!groups.has(r)) groups.set(r, []);
+        groups.get(r).push(w);
+      });
+      const keys = [...groups.keys()].sort((a, b) => (a === NO_REGION) - (b === NO_REGION) || a.localeCompare(b, 'fr'));
+      slot.innerHTML = keys.map((k) => `<h2 class="group-h">${esc(k)} <span class="n">${groups.get(k).length}</span></h2>${groups.get(k).map((w) => wineRow(w)).join('')}`).join('');
+    } else {
+      slot.innerHTML = rows.map((w) => wineRow(w)).join('');
+    }
   }
+  if (!list.length) { const t = $('[data-slot="tabs"]'); if (t) t.innerHTML = ''; }
 }
 
 function bindCave() {
   renderCaveList();
   $('#cave-q').addEventListener('input', (e) => { state.cave.q = e.target.value; renderCaveList(); });
+  $('[data-slot="tabs"]').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tab]');
+    if (!b) return;
+    state.cave.tab = b.dataset.tab;
+    renderCaveList();
+    const t = $('[data-slot="tabs"]');
+    if (t && t.getBoundingClientRect().top < 0) t.scrollIntoView();
+  });
   $('[data-action="instock"]').addEventListener('click', () => { state.cave.inStock = !state.cave.inStock; render(); });
   $$('[data-filter]').forEach((s) => s.addEventListener('change', () => { state.cave[s.dataset.filter] = s.value; render(); }));
   $$('[data-sort]').forEach((b) => b.addEventListener('click', () => { state.cave.sort = b.dataset.sort; render(); }));
@@ -1212,7 +1253,11 @@ function render() {
     if (r.name !== 'edit') state.edit = null;
     if (r.name !== 'retirer') state.retirer = { q: '', sel: null, n: 1 };
   }
-  const scrollTop = key === lastRouteKey ? window.scrollY : 0;
+  if (lastRouteKey === 'cave' && key !== 'cave') state.caveScroll = window.scrollY;
+  const prev = lastRouteKey.replace(/^(fiche|edit|retirer).*/, '$1');
+  let scrollTop = key === lastRouteKey ? window.scrollY : 0;
+  // Powrót z karty wina: lista w tym samym miejscu.
+  if (key === 'cave' && key !== lastRouteKey && ['fiche', 'edit', 'retirer'].includes(prev)) scrollTop = state.caveScroll;
   const screens = {
     home: [screenHome, bindHome],
     cave: [screenCave, bindCave],
