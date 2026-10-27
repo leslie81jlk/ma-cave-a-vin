@@ -1,5 +1,8 @@
 # Ma Cave à Vin - instalacja
 
+**Od wersji 1.1.0 baza danych jest w prywatnym repozytorium GitHub (plik cave.json), a nie w Google Sheets.** Konfiguracja: Paramètres > Synchronisation > repozytorium i jeton GitHub (patrz sekcja 'Photos pour Claude' poniżej). Sekcje o Google Cloud dotyczą tylko wersji 1.0.x.
+
+
 Aplikacja działa od razu w trybie lokalnym: dane zapisują się w telefonie, a kopię robisz przyciskiem 'Exporter' w Paramètres. Synchronizacja z arkuszem Google wymaga trzech kroków poniżej, razem około 20 minut.
 
 ## 1. Hosting na GitHub Pages

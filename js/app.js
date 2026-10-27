@@ -4,7 +4,7 @@ import * as L from './logic.js';
 import * as S from './sync.js';
 import * as SC from './scans.js';
 
-const APP_VERSION = '1.0.4';
+const APP_VERSION = '1.1.0';
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
 
@@ -224,7 +224,7 @@ async function runSync(interactive) {
   } catch (e) {
     state.syncError = e.message || 'Erreur de synchronisation';
     if (e.code === 'auth') state.needsLogin = true;
-    if (e.code === 'access') state.syncError = 'Accès à la base non accordé. Choisissez-la à nouveau dans Paramètres.';
+    if (e.code === 'auth') state.syncError = 'Jeton GitHub refusé : vérifiez-le dans Paramètres.';
     state.queueCount = await db.count('queue');
   } finally {
     state.syncing = false;
@@ -1064,39 +1064,32 @@ function screenParametres(extra) {
   const reviews = state.wines.map((w) => L.str(w.maturity_reviewed_at).slice(0, 10)).filter(Boolean).sort();
   const lastReview = reviews.length ? reviews[reviews.length - 1] : null;
   const bottles = state.wines.reduce((s, w) => s + L.qty(w), 0);
-  let syncBody;
-  if (!ok) {
-    syncBody = `<div class="note-box">${ICON.info}<span>La synchronisation avec Google n'est pas encore configurée. Vos données restent sur ce téléphone ; pensez à exporter une copie.</span></div>`;
-  } else {
-    syncBody = `
-      <div style="display:flex;align-items:center;gap:10px;font-size:14px">
-        <span style="color:${state.queueCount || state.syncError ? 'var(--warn)' : 'var(--ok)'}">${state.queueCount || state.syncError ? ICON.cloudOff : ICON.check}</span>
-        <span style="flex:1">${state.syncing ? 'Synchronisation…' : state.syncError ? esc(state.syncError) : state.queueCount ? `${plural(state.queueCount, 'modification', 'modifications')} en attente` : 'Tout est à jour'}</span>
-      </div>
-      <div class="kv"><span>Dernière synchronisation</span><span>${fmtDate(state.lastSync)}</span></div>
-      <div class="kv"><span>Base</span><span>Ma Cave à Vin - base</span></div>
-      <button type="button" class="btn-outline" data-action="sync-now"${state.syncing ? ' disabled' : ''}>Synchroniser maintenant</button>
-      <button type="button" class="btn-ghost" data-action="connect" style="justify-content:center">Connecter Google et choisir la base</button>
-      <button type="button" class="btn-ghost" data-action="disconnect" style="justify-content:center">Se déconnecter de Google</button>`;
-  }
+  const status = state.syncing ? 'Synchronisation…' : state.syncError ? esc(state.syncError)
+    : state.queueCount ? `${plural(state.queueCount, 'modification', 'modifications')} en attente` : 'Tout est à jour';
   return `
   <div class="screen">
     ${topbar('Paramètres', '#/')}
-    <section class="card" aria-labelledby="p-sync"><h2 class="h2" id="p-sync">Synchronisation</h2>${syncBody}</section>
-    <section class="card" aria-labelledby="p-scan"><h2 class="h2" id="p-scan">Photos pour Claude</h2>
-      <p class="small muted" style="margin:0">Une copie de chaque étiquette est envoyée dans un dépôt GitHub privé, pour que Claude puisse la lire et compléter la fiche.</p>
-      <div class="kv"><span>État</span><span data-slot="scan-status">…</span></div>
+    <section class="card" aria-labelledby="p-sync"><h2 class="h2" id="p-sync">Synchronisation</h2>
+      <p class="small muted" style="margin:0">La cave et les photos des étiquettes sont enregistrées dans votre dépôt GitHub privé. Claude y lit les étiquettes et complète les fiches.</p>
+      ${ok ? `
+      <div style="display:flex;align-items:center;gap:10px;font-size:14px">
+        <span style="color:${state.queueCount || state.syncError ? 'var(--warn)' : 'var(--ok)'}">${state.queueCount || state.syncError ? ICON.cloudOff : ICON.check}</span>
+        <span style="flex:1">${status}</span>
+      </div>
+      <div class="kv"><span>Dernière synchronisation</span><span>${fmtDate(state.lastSync)}</span></div>
+      <div class="kv"><span>Photos</span><span data-slot="scan-status">…</span></div>
+      <button type="button" class="btn-outline" data-action="sync-now"${state.syncing ? ' disabled' : ''}>Synchroniser maintenant</button>` : `
+      <div class="note-box">${ICON.info}<span>Synchronisation non configurée : vos données restent sur ce téléphone.</span></div>`}
       <form data-form="scans" style="display:flex;flex-direction:column;gap:12px" autocomplete="off">
         <div class="field"><label for="s-repo">Dépôt privé</label>
           <input class="input" id="s-repo" name="repo" type="text" value="${esc(SC.config().repo)}" autocapitalize="off" spellcheck="false"></div>
         <div class="field"><label for="s-token">Jeton d'accès GitHub</label>
-          <input class="input" id="s-token" name="token" type="password" placeholder="${SC.enabled() ? 'Jeton enregistré · laisser vide pour le garder' : 'github_pat_…'}" autocapitalize="off" spellcheck="false"></div>
-        <button type="submit" class="btn-outline">${SC.enabled() ? 'Enregistrer et envoyer' : 'Activer'}</button>
-        ${SC.enabled() ? '<button type="button" class="btn-ghost" data-action="scan-off" style="justify-content:center">Désactiver</button>' : ''}
+          <input class="input" id="s-token" name="token" type="password" placeholder="${ok ? 'Jeton enregistré · laisser vide pour le garder' : 'github_pat_…'}" autocapitalize="off" spellcheck="false"></div>
+        <button type="submit" class="btn-ghost" style="justify-content:center">${ok ? 'Modifier le dépôt ou le jeton' : 'Activer la synchronisation'}</button>
       </form>
     </section>
     <section class="card" aria-labelledby="p-save"><h2 class="h2" id="p-save">Sauvegarde</h2>
-      <p class="small muted" style="margin:0">Une copie hors de Google : un fichier .zip avec le tableau Excel et les photos des étiquettes.</p>
+      <p class="small muted" style="margin:0">Une copie à garder ailleurs : un fichier .zip avec le tableau Excel et les photos des étiquettes.</p>
       <div class="kv"><span>Dernier export</span><span data-slot="last-export">…</span></div>
       <button type="button" class="btn-outline" data-action="export">Exporter (.xlsx + photos)</button>
     </section>
@@ -1120,30 +1113,15 @@ async function bindParametres() {
   try { persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : false; } catch (e) { /* brak */ }
   $('[data-slot="persist"]').textContent = persisted ? 'oui' : 'non garanti';
   const on = (sel, fn) => { const el = $(sel); if (el) el.addEventListener('click', fn); };
-  on('[data-action="sync-now"]', () => runSync(true));
-  on('[data-action="connect"]', async () => {
-    try {
-      await S.connect();
-      await runSync(true);
-    } catch (e) {
-      state.syncError = 'Connexion Google annulée ou refusée.';
-      render();
-    }
-  });
-  on('[data-action="disconnect"]', async () => {
-    await S.disconnect();
-    state.needsLogin = true;
-    toast('Déconnecté de Google. Les données restent sur ce téléphone.');
-    render();
-  });
+  on('[data-action="sync-now"]', () => { runSync(true); runScans(); });
   on('[data-action="export"]', exportAll);
 
   const scanSlot = $('[data-slot="scan-status"]');
-  const n = await SC.pending();
-  scanSlot.textContent = !SC.enabled() ? 'non activé'
-    : state.scanError ? state.scanError
-      : n ? `${plural(n, 'photo', 'photos')} en attente` : 'à jour';
-  if (state.scanError) scanSlot.style.color = 'var(--warn)';
+  if (scanSlot) {
+    const n = await SC.pending();
+    scanSlot.textContent = state.scanError ? state.scanError : n ? `${plural(n, 'photo', 'photos')} en attente` : 'à jour';
+    if (state.scanError) scanSlot.style.color = 'var(--warn)';
+  }
   $('[data-form="scans"]').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const repo = $('#s-repo').value.trim();
@@ -1153,18 +1131,14 @@ async function bindParametres() {
       await SC.test(repo, token);
       SC.save(repo, token);
       state.scanError = null;
-      toast('Photos pour Claude activées. Envoi en cours…');
+      state.syncError = null;
+      toast('Synchronisation activée.');
       render();
       await runScans();
-      if (!state.scanError) toast('Photos envoyées.');
+      await runSync(true);
     } catch (e) {
       toast(e.message);
     }
-  });
-  on('[data-action="scan-off"]', () => {
-    SC.clear();
-    toast('Envoi des photos désactivé.');
-    render();
   });
 }
 
@@ -1279,8 +1253,7 @@ async function start() {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleSync(); });
   render();
   scheduleScans();
-  if (S.configured() && S.hasToken() && navigator.onLine) runSync(false);
-  else if (S.configured() && (await db.getMeta('consented'))) { state.needsLogin = true; refreshStatus(); }
+  if (S.configured() && navigator.onLine) runSync(false);
 }
 
 start();
