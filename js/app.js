@@ -4,7 +4,7 @@ import * as L from './logic.js';
 import * as S from './sync.js';
 import * as SC from './scans.js';
 
-const APP_VERSION = '1.4.1';
+const APP_VERSION = '1.5.0';
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
 
@@ -15,7 +15,7 @@ const state = {
   syncing: false,
   syncError: null,
   needsLogin: false,
-  cave: { q: '', inStock: true, color: '', tab: 'France', region: '', mat: '', sort: 'maturity' },
+  cave: { q: '', inStock: true, color: '', tab: 'France', region: '', mat: '', sort: 'maturity', jump: '' },
   caveScroll: 0,
   add: null,
   retirer: { q: '', sel: null, n: 1 },
@@ -45,6 +45,7 @@ const ICON = {
   info: '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E4AE93" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
   check: '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
   cloudOff: '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 1l22 22M16.7 16.7A7 7 0 0 1 5 12M8.5 3.6A8 8 0 0 1 19 12M5 12a7 7 0 0 1 .9-3.4"/></svg>',
+  clock: '<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   chevron: '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>'
 };
 
@@ -189,7 +190,7 @@ async function photoUrl(id, file) {
   return url;
 }
 
-// Powiększenie etykiety: szczypanie, przesuwanie, podwójne dotknięcie.
+// Powiększenie etykiety: dotknięcie zamyka, przytrzymanie powiększa (i wraca), szczypanie, przesuwanie.
 function openViewer(pages) {
   const ov = document.createElement('div');
   ov.className = 'viewer';
@@ -203,7 +204,7 @@ function openViewer(pages) {
   const img = ov.querySelector('img');
   let z = 1, x = 0, y = 0;
   const pts = new Map();
-  let start = null, lastTap = 0;
+  let start = null, press = null, gesture = null;
   const apply = () => { img.style.transform = `translate(${x}px, ${y}px) scale(${z})`; };
   const show = (i) => {
     img.src = pages[i].url; img.alt = pages[i].label; z = 1; x = 0; y = 0; apply();
@@ -222,18 +223,27 @@ function openViewer(pages) {
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     snapshot();
     if (pts.size === 1) {
-      const now = Date.now();
-      if (now - lastTap < 300) {
+      gesture = { x: e.clientX, y: e.clientY, moved: false, multi: false, long: false };
+      clearTimeout(press);
+      press = setTimeout(() => {
+        if (!gesture || gesture.moved || gesture.multi) return;
+        gesture.long = true;
         const r = stage.getBoundingClientRect();
-        const cx = e.clientX - r.left - r.width / 2, cy = e.clientY - r.top - r.height / 2;
+        const cx = gesture.x - r.left - r.width / 2, cy = gesture.y - r.top - r.height / 2;
         if (z > 1) { z = 1; x = 0; y = 0; } else { z = 2.5; x = -cx * 1.5; y = -cy * 1.5; }
-        apply(); lastTap = 0; snapshot();
-      } else lastTap = now;
-    }
+        img.style.transition = 'transform .2s';
+        apply();
+        setTimeout(() => { img.style.transition = ''; }, 220);
+        if (navigator.vibrate) navigator.vibrate(10);
+        snapshot();
+      }, 450);
+    } else if (gesture) { gesture.multi = true; clearTimeout(press); }
   });
+  stage.addEventListener('contextmenu', (e) => e.preventDefault());
   stage.addEventListener('pointermove', (e) => {
     if (!pts.has(e.pointerId)) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (gesture && Math.hypot(e.clientX - gesture.x, e.clientY - gesture.y) > 10) { gesture.moved = true; clearTimeout(press); }
     const a = [...pts.values()];
     if (a.length > 1 && start.d) {
       const c = { x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 };
@@ -249,7 +259,16 @@ function openViewer(pages) {
     }
     apply();
   });
-  const up = (e) => { pts.delete(e.pointerId); if (z <= 1.01) { z = 1; x = 0; y = 0; apply(); } if (pts.size) snapshot(); };
+  const up = (e) => {
+    pts.delete(e.pointerId);
+    if (z <= 1.01) { z = 1; x = 0; y = 0; apply(); }
+    if (pts.size) { snapshot(); return; }
+    clearTimeout(press);
+    const g = gesture;
+    gesture = null;
+    // Zwykłe dotknięcie (bez ruchu, szczypania i przytrzymania): zamknięcie podglądu.
+    if (e.type === 'pointerup' && g && !g.moved && !g.multi && !g.long) history.back();
+  };
   stage.addEventListener('pointerup', up);
   stage.addEventListener('pointercancel', up);
   ov.querySelectorAll('[data-vpage]').forEach((b) => b.addEventListener('click', () => show(Number(b.dataset.vpage))));
@@ -351,7 +370,6 @@ function screenHome() {
   const st = L.stats(state.wines);
   const shelf = L.shelf(state.wines);
   const inStock = state.wines.filter((w) => L.qty(w) > 0);
-  const soon = L.sortWines(inStock, 'maturity').filter((w) => L.maturity(w).rank >= 5).slice(0, 3);
   const todo = state.wines.filter((w) => ['À compléter', 'À vérifier'].includes(L.str(w.status_fiche))).length;
   const greet = new Date().getHours() < 18 ? 'Bonjour' : 'Bonsoir';
   return `
@@ -365,7 +383,7 @@ function screenHome() {
       <div class="shelf" role="img" aria-label="Répartition des bouteilles par couleur">${shelf.map((b) => bottle(b.tint, 18, 68)).join('')}</div>
       <div class="shelf-total">
         <span><b>${st.bottles}</b> <span class="muted small">${st.bottles === 1 ? 'bouteille' : 'bouteilles'} · ${plural(st.wines, 'vin', 'vins')}</span></span>
-        ${st.soon ? `<span class="small" style="color:var(--accent);font-weight:600">${st.soon} à ouvrir</span>` : ''}
+        ${st.soon ? `<a class="small" href="#/bientot" style="color:var(--accent);font-weight:600;text-decoration:none">${st.soon} à ouvrir</a>` : ''}
       </div>
     </section>
     <form class="search" data-form="home-search" role="search">
@@ -376,15 +394,10 @@ function screenHome() {
       <a class="tile" href="#/cave"><span style="color:var(--accent)">${ICON.bottle}</span>Ma cave</a>
       <a class="tile" href="#/stats"><span style="color:var(--accent)">${ICON.chart}</span>Statistiques</a>
       <a class="tile primary" href="#/ajouter">${ICON.plus}Ajouter un vin</a>
-      <a class="tile" href="#/retirer"><span style="color:var(--accent)">${ICON.minus}</span>Retirer du stock</a>
+      <a class="tile" href="#/bientot"><span style="color:var(--accent);display:flex;justify-content:space-between;align-items:center">${ICON.clock}${st.soon ? `<b style="font-family:var(--serif);font-size:22px">${st.soon}</b>` : ''}</span>À ouvrir bientôt</a>
     </div>
     ${state.wines.length === 0 ? `
       <div class="empty"><p class="h2">Votre cave est vide</p><p class="small">Ajoutez votre premier vin, ou demandez à Claude d'importer vos notes.</p></div>` : ''}
-    ${soon.length ? `
-      <section class="list" aria-labelledby="soon-h">
-        <h2 class="h2" id="soon-h">À ouvrir bientôt</h2>
-        ${soon.map(wineRow).join('')}
-      </section>` : ''}
     ${todo ? `<a class="banner" href="#/cave">${ICON.info}<span><strong>${plural(todo, 'fiche', 'fiches')} à compléter.</strong> Demandez à Claude : 'Mets à jour ma cave'.</span></a>` : ''}
   </div>`;
 }
@@ -409,7 +422,7 @@ function wineRow(w, opts = {}) {
     ${bottle(tintOf(w))}
     <span class="body">
       <span class="name">${esc(L.displayName(w))}</span>
-      <span class="sub">${esc(L.subtitle(w) || L.sizeLabel(w))}</span>
+      <span class="sub">${esc([L.subtitle(w), L.sizeNote(w)].filter(Boolean).join(' · '))}</span>
       <span class="mat" ${m.score ? '' : 'style="color:var(--warn)"'}>${m.score ? `${m.score}/5 · ` : ''}${esc(m.label)}</span>
     </span>
     <span class="side">
@@ -447,7 +460,7 @@ const countryOf = (w) => L.str(w.country) || NO_COUNTRY;
 // Zakładki krajów: Francja pierwsza, potem alfabetycznie, wina bez kraju na końcu.
 function countryTabs(list) {
   const counts = new Map();
-  list.forEach((w) => counts.set(countryOf(w), (counts.get(countryOf(w)) || 0) + 1));
+  list.forEach((w) => counts.set(countryOf(w), (counts.get(countryOf(w)) || 0) + L.qty(w)));
   const rank = (k) => (k === 'France' ? 0 : k === NO_COUNTRY ? 2 : 1);
   return [...counts.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0], 'fr'));
 }
@@ -462,13 +475,14 @@ function selectChip(name, label, value, options) {
 
 function screenCave() {
   const c = state.cave;
-  const sorts = [['region', 'Région'], ['score', 'Note'], ['maturity', 'Maturité'], ['vintage', 'Millésime']];
+  const sorts = [['maturity', 'Maturité'], ['vintage', 'Millésime'], ['score', 'Note'], ['appellation', 'Appellation'], ['producer', 'Producteur']];
+  if (!sorts.some(([k]) => k === c.sort)) c.sort = 'maturity';
   const colors = Object.entries(L.COLORS).map(([k, v]) => [k, v.label]);
   const mats = [['beyond', 'Au-delà de la fenêtre'], ['5', '5/5 · Sans trop attendre'], ['4', '4/5 · À boire'], ['3', '3/5 · Approche'],
     ['2', '2/5 · À attendre'], ['1', '1/5 · Trop jeune'], ['0', 'À estimer']];
   return `
   <div class="screen">
-    <div class="topbar"><a class="back" href="#/" aria-label="Retour à l'accueil">${ICON.back}</a><h1 class="title">Ma cave</h1><span class="small muted" data-slot="count"></span></div>
+    <div class="topbar"><a class="back" href="#/" aria-label="Retour à l'accueil">${ICON.back}</a><h1 class="title">Ma cave</h1></div>
     <div class="search" role="search">${ICON.search}<label class="sr-only" for="cave-q">Rechercher dans la cave</label>
       <input id="cave-q" type="search" placeholder="Nom, producteur, appellation…" value="${esc(c.q)}" autocomplete="off"></div>
     <div class="wrap" role="group" aria-label="Filtres">
@@ -489,8 +503,6 @@ function screenCave() {
 function renderCaveList() {
   const list = filteredWines();
   const slot = $('[data-slot="list"]');
-  const count = $('[data-slot="count"]');
-  if (count) count.textContent = plural(list.length, 'vin', 'vins');
   if (!slot) return;
   if (!state.wines.length) {
     slot.innerHTML = `<div class="empty"><p class="h2">Votre cave est vide</p><p class="small"><a href="#/ajouter">Ajouter un vin</a></p></div>`;
@@ -505,8 +517,8 @@ function renderCaveList() {
       tabSlot.innerHTML = tabs.map(([k, n]) => `<button type="button" class="tab" role="tab" data-tab="${esc(k)}" aria-selected="${k === tab}">${esc(k)} <span class="n">${n}</span></button>`).join('');
     }
     const rows = list.filter((w) => countryOf(w) === tab);
-    if (count) count.textContent = plural(rows.length, 'vin', 'vins');
-    if (tab === 'France') {
+    // Regroupement permanent par région ; le tri choisi s'applique dans chaque région.
+    {
       const groups = new Map();
       rows.forEach((w) => {
         const r = L.str(w.region) || NO_REGION;
@@ -514,9 +526,8 @@ function renderCaveList() {
         groups.get(r).push(w);
       });
       const keys = [...groups.keys()].sort((a, b) => (a === NO_REGION) - (b === NO_REGION) || a.localeCompare(b, 'fr'));
-      slot.innerHTML = keys.map((k) => `<h2 class="group-h">${esc(k)} <span class="n">${groups.get(k).length}</span></h2>${groups.get(k).map((w) => wineRow(w)).join('')}`).join('');
-    } else {
-      slot.innerHTML = rows.map((w) => wineRow(w)).join('');
+      const bt = (ws) => ws.reduce((s, w) => s + L.qty(w), 0);
+      slot.innerHTML = keys.map((k) => `<h2 class="group-h" data-region="${esc(k)}"><span>${esc(k)}</span><span class="n" aria-label="${plural(bt(groups.get(k)), 'bouteille', 'bouteilles')}">${bt(groups.get(k))}</span></h2>${groups.get(k).map((w) => wineRow(w)).join('')}`).join('');
     }
   }
   if (!list.length) { const t = $('[data-slot="tabs"]'); if (t) t.innerHTML = ''; }
@@ -569,20 +580,22 @@ function screenFiche(id) {
   const info = [
     ['Pays', w.country], ['Région', w.region], ['Sous-région', w.subregion], ['Appellation', w.appellation],
     ['Prix d\'achat', L.fmtPrice(w.purchase_price) ? `${L.fmtPrice(w.purchase_price)} ${esc(w.purchase_currency || 'EUR')} / bt` : ''],
-    ['Contenance', L.sizeLabel(w)]
+    ['Contenance', L.sizeNote(w)]
   ].filter(([, v]) => L.str(v));
+  const producer = L.str(w.producer);
+  const title = L.str(w.name) || producer || 'Vin à identifier';
+  const showProducer = producer && producer !== title;
+  const line3 = [L.colorInfo(w) ? L.colorInfo(w).label : '', L.str(w.grapes)].filter(Boolean).join(' · ');
   const score = L.fmtScore(w.personal_score);
   return `
   <div class="screen">
-    <div class="topbar" style="justify-content:space-between"><a class="back" href="#/cave" aria-label="Retour à la cave">${ICON.back}</a>
-      <a class="btn-ghost" href="#/vin/${encodeURIComponent(w.id)}/modifier">Modifier</a></div>
+    <div class="topbar"><a class="back" href="${state.ficheBack || '#/cave'}" aria-label="Retour">${ICON.back}</a></div>
     <div class="hero">
       <div class="photo" data-slot="photo">${bottle(tintOf(w), 34, 112, true)}</div>
       <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
-        <p class="kicker" style="margin:0">${esc([w.appellation, L.vintageLabel(w)].filter(Boolean).join(' ') || 'Millésime à préciser')}</p>
-        <h1 class="title" style="font-size:28px">${esc(L.displayName(w))}</h1>
-        ${L.str(w.name) && L.str(w.producer) && L.str(w.producer) !== L.str(w.name) ? `<p class="small" style="margin:0">${esc(w.producer)}</p>` : ''}
-        <p class="small muted" style="margin:0">${esc([L.colorInfo(w) ? L.colorInfo(w).label : '', L.sizeLabel(w)].filter(Boolean).join(' · '))}</p>
+        ${showProducer ? `<p class="producer">${esc(producer)}</p>` : ''}
+        <h1 class="title" style="font-size:28px">${esc(title)}${L.vintageLabel(w) ? ` <span class="vint">${esc(L.vintageLabel(w))}</span>` : ''}</h1>
+        ${line3 ? `<p style="margin:0;font-size:15px;color:var(--soft)">${esc(line3)}</p>` : ''}
       </div>
     </div>
     ${statusBadge(w) ? `<div class="banner warn">${ICON.info}<span><strong>${esc(w.status_fiche)}.</strong> ${esc(w.claude_note || 'Les informations seront complétées par Claude.')}</span></div>` : ''}
@@ -593,11 +606,8 @@ function screenFiche(id) {
     </div>
     <section class="card" aria-labelledby="info-h">
       <h2 class="h2" id="info-h">Informations</h2>
-      ${info.length ? `<dl class="info">${info.map(([k, v]) => `<div><dt>${k}</dt><dd>${k === 'Prix d\'achat' ? v : esc(v)}</dd></div>`).join('')}
-        ${L.str(w.grapes) ? `<div class="full"><dt>Cépages</dt><dd>${esc(w.grapes)}</dd></div>` : ''}</dl>` : ''}
+      ${info.length ? `<dl class="info">${info.map(([k, v]) => `<div><dt>${k}</dt><dd>${k === 'Prix d\'achat' ? v : esc(v)}</dd></div>`).join('')}</dl>` : ''}
       ${L.str(w.description_fr) ? `<p class="desc">${esc(w.description_fr)}</p>` : ''}
-      ${L.str(w.status_fiche) === 'Complété' && L.str(w.claude_note) ? `<p class="small" style="margin:0;padding:10px 12px;background:var(--bg);border-radius:12px;color:var(--soft)">${esc(w.claude_note)}</p>` : ''}
-      <p class="tiny muted" style="margin:0">${L.str(w.status_fiche) === 'Complété' ? 'Complété par Claude' : 'En attente de Claude'}${L.str(w.locked_fields) ? ` · corrigé à la main : ${esc([...L.lockedSet(w)].map((k) => FIELD_LABELS[k] || k).join(', '))}` : ''}</p>
     </section>
     <section class="card" aria-labelledby="avis-h">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
@@ -613,6 +623,7 @@ function screenFiche(id) {
       </div>
       ${matBody}
     </section>
+    <a class="btn-outline" href="#/vin/${encodeURIComponent(w.id)}/modifier">Modifier la fiche</a>
   </div>`;
 }
 
@@ -844,7 +855,7 @@ function screenAjouter() {
 function dupCard(w) {
   return `<div class="card" role="alert" style="box-shadow:inset 0 0 0 2px var(--accent)">
     <p style="margin:0"><strong>Ce vin existe déjà</strong> dans votre cave (${plural(L.qty(w), 'bouteille', 'bouteilles')}).</p>
-    <p class="small muted" style="margin:0">${esc(L.displayName(w))} · ${esc(L.subtitle(w) || L.sizeLabel(w))}</p>
+    <p class="small muted" style="margin:0">${esc([L.displayName(w), L.subtitle(w), L.sizeNote(w)].filter(Boolean).join(' · '))}</p>
     <button type="button" class="btn" data-action="dup-add">Ajouter ${plural(state.add.count, 'bouteille', 'bouteilles')} au stock</button>
     <button type="button" class="btn-outline" data-action="dup-new">Créer une nouvelle fiche</button>
   </div>`;
@@ -1212,30 +1223,88 @@ function bindRetirer() {
 }
 
 // ---------------------------------------------------------------- Statistiques
-function bars(rows, colorFn) {
+function bars(rows, colorFn, linkFn) {
   const max = Math.max(1, ...rows.map((r) => r.n));
-  return rows.map((r) => `<div class="bar-row"><span>${esc(r.label)}</span>
-    <span class="bar-track" aria-hidden="true"><span class="bar-fill" style="display:block;width:${Math.round((r.n / max) * 100)}%;background:${colorFn(r)}"></span></span><b>${r.n}</b></div>`).join('');
+  return rows.map((r, i) => {
+    const link = linkFn ? linkFn(r) : null;
+    const open = link ? `a class="bar-row" href="#/cave" data-jump-country="${esc(link.country)}" data-jump-region="${esc(link.region || '')}"` : 'div class="bar-row"';
+    return `<${open}><span>${esc(r.label)}</span>
+    <span class="bar-track" aria-hidden="true"><span class="bar-fill" style="display:block;width:${Math.round((r.n / max) * 100)}%;background:${colorFn(r)}"></span></span><b>${r.n}</b></${link ? 'a' : 'div'}>`;
+  }).join('');
+}
+
+// Procenty sumujące się do 100 (metoda największej reszty).
+function percents(values) {
+  const total = values.reduce((a, b) => a + b, 0) || 1;
+  const raw = values.map((v) => (v / total) * 100);
+  const out = raw.map(Math.floor);
+  let left = 100 - out.reduce((a, b) => a + b, 0);
+  raw.map((v, i) => [v - out[i], i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { out[i] += 1; left -= 1; } });
+  return out;
+}
+
+function donut(rows) {
+  const pct = percents(rows.map((r) => r.n));
+  const total = rows.reduce((a, r) => a + r.n, 0) || 1;
+  const R = 15.915; // obwód 100
+  let off = 25;
+  const gap = rows.length > 1 ? 0.8 : 0;
+  const arcs = rows.map((r) => {
+    const len = (r.n / total) * 100;
+    const seg = `<circle cx="21" cy="21" r="${R}" fill="none" stroke="${r.tint}" stroke-width="6" stroke-dasharray="${Math.max(0, len - gap)} ${100 - Math.max(0, len - gap)}" stroke-dashoffset="${off}"/>`;
+    off -= len;
+    return seg;
+  }).join('');
+  return `<div class="donut-wrap">
+    <svg class="donut" viewBox="0 0 42 42" role="img" aria-label="${esc(rows.map((r, i) => `${r.label} ${pct[i]} %`).join(', '))}">${arcs}</svg>
+    <ul class="legend">${rows.map((r, i) => `<li><i style="background:${r.tint}"></i><span>${esc(r.label)}</span><b>${pct[i] || r.n === 0 ? pct[i] : '<1'} %</b></li>`).join('')}</ul>
+  </div>`;
 }
 
 function screenStats() {
   const st = L.stats(state.wines);
   const body = !st.bottles ? `<div class="empty"><p class="h2">Pas encore de statistiques</p><p class="small">Elles apparaîtront dès le premier vin en cave.</p></div>` : `
-    <section class="card" aria-labelledby="s-pays"><h2 class="h2" id="s-pays">Par pays</h2>${bars(st.countries, (r) => (r.unknown ? '#6E5878' : '#E4AE93'))}</section>
-    <section class="card" aria-labelledby="s-reg"><h2 class="h2" id="s-reg">Par région</h2>${bars(st.regions, (r) => (r.unknown ? '#6E5878' : '#E4AE93'))}</section>
-    <section class="card" aria-labelledby="s-col"><h2 class="h2" id="s-col">Par couleur</h2>
-      <div class="bottles4">${st.colors.map((c) => `<div>${bottle(c.tint, 22, 60)}<b>${c.n}</b><span class="tiny muted">${esc(c.label)}</span></div>`).join('')}</div></section>
+    <section class="card" aria-labelledby="s-pays"><h2 class="h2" id="s-pays">Par pays</h2>${bars(st.countries, (r) => (r.unknown ? '#6E5878' : '#E4AE93'), (r) => ({ country: r.unknown ? NO_COUNTRY : r.label }))}</section>
+    <section class="card" aria-labelledby="s-reg"><h2 class="h2" id="s-reg">Par région</h2>${bars(st.regions, (r) => (r.unknown ? '#6E5878' : '#E4AE93'), (r) => (r.unknown ? null : { country: r.country || NO_COUNTRY, region: r.label }))}</section>
+    <section class="card" aria-labelledby="s-col"><h2 class="h2" id="s-col">Par couleur</h2>${donut(st.colors)}</section>
     <section class="card" aria-labelledby="s-mat"><h2 class="h2" id="s-mat">Par maturité</h2>${bars(st.maturity, (r) => r.c)}</section>
-    <p class="tiny muted" style="margin:0">Nombre de bouteilles en cave.</p>`;
+    <p class="tiny muted" style="margin:0">Nombre de bouteilles en cave. Touchez un pays ou une région pour l'ouvrir dans la cave.</p>`;
   return `
   <div class="screen">
     ${topbar('Statistiques', '#/')}
     <div class="grid3">
       <div class="kpi"><b>${st.bottles}</b><span>${st.bottles === 1 ? 'bouteille' : 'bouteilles'}</span></div>
       <div class="kpi"><b>${st.wines}</b><span>vins</span></div>
-      <div class="kpi"><b style="color:var(--accent)">${st.soon}</b><span>à ouvrir bientôt</span></div>
+      <a class="kpi link" href="#/bientot"><b style="color:var(--accent)">${st.soon}</b><span>à ouvrir bientôt</span></a>
     </div>
     ${body}
+  </div>`;
+}
+
+function bindStats() {
+  $$('[data-jump-country]').forEach((a) => a.addEventListener('click', () => {
+    // Pełna cave (bez filtrów), właściwa zakładka kraju i przewinięcie do regionu.
+    Object.assign(state.cave, { q: '', inStock: true, color: '', region: '', mat: '', tab: a.dataset.jumpCountry, jump: a.dataset.jumpRegion || 'top' });
+  }));
+}
+
+// ---------------------------------------------------------------- À ouvrir bientôt
+function soonWines() {
+  return L.sortWines(state.wines.filter((w) => L.qty(w) > 0 && L.maturity(w).rank >= 5), 'maturity');
+}
+
+function screenBientot() {
+  const list = soonWines();
+  const beyond = list.filter((w) => L.maturity(w).beyond);
+  const ready = list.filter((w) => !L.maturity(w).beyond);
+  const n = (ws) => ws.reduce((s, w) => s + L.qty(w), 0);
+  const group = (title, ws) => (ws.length ? `<h2 class="group-h"><span>${title}</span><span class="n">${n(ws)}</span></h2>${ws.map((w) => wineRow(w)).join('')}` : '');
+  return `
+  <div class="screen">
+    ${topbar('À ouvrir bientôt', '#/')}
+    ${list.length ? `<p class="small muted" style="margin:0">Vins à 5/5 de maturité ou déjà au-delà de leur fenêtre de dégustation.</p>
+    <div class="list">${group('Au-delà de la fenêtre', beyond)}${group('À boire sans trop attendre', ready)}</div>`
+    : `<div class="empty"><p class="h2">Rien ne presse</p><p class="small">Aucun vin n'est à ouvrir rapidement.</p></div>`}
   </div>`;
 }
 
@@ -1391,6 +1460,7 @@ function currentRoute() {
   if (a === 'import') return { name: 'import' };
   if (a === 'retirer') return { name: 'retirer', id: b };
   if (a === 'stats') return { name: 'stats' };
+  if (a === 'bientot') return { name: 'bientot' };
   if (a === 'parametres') return { name: 'parametres' };
   return { name: 'home' };
 }
@@ -1404,10 +1474,18 @@ function render() {
     if (r.name !== 'retirer') state.retirer = { q: '', sel: null, n: 1 };
   }
   if (lastRouteKey === 'cave' && key !== 'cave') state.caveScroll = window.scrollY;
+  if (lastRouteKey === 'bientot' && key !== 'bientot') state.soonScroll = window.scrollY;
   const prev = lastRouteKey.replace(/^(fiche|edit|retirer).*/, '$1');
+  // Karta wina wraca tam, skąd przyszła (cave albo À ouvrir bientôt).
+  if (r.name === 'fiche' && ['cave', 'bientot'].includes(prev)) state.ficheBack = `#/${prev}`;
   let scrollTop = key === lastRouteKey ? window.scrollY : 0;
   // Powrót z karty wina: lista w tym samym miejscu.
-  if (key === 'cave' && key !== lastRouteKey && ['fiche', 'edit', 'retirer'].includes(prev)) scrollTop = state.caveScroll;
+  if (key === 'cave' && key !== lastRouteKey && ['fiche', 'edit', 'retirer'].includes(prev)) {
+    scrollTop = state.caveScroll;
+    // Wino otwarte z wyszukiwania: po powrocie czyste pole i pełna lista od góry.
+    if (state.cave.q) { state.cave.q = ''; scrollTop = 0; }
+  }
+  if (key === 'bientot' && key !== lastRouteKey && ['fiche', 'edit', 'retirer'].includes(prev)) scrollTop = state.soonScroll || 0;
   const screens = {
     home: [screenHome, bindHome],
     cave: [screenCave, bindCave],
@@ -1417,13 +1495,19 @@ function render() {
     lot: [screenLot, bindLot],
     import: [screenImport, bindImport],
     retirer: [() => screenRetirer(r.id), bindRetirer],
-    stats: [screenStats, () => {}],
+    stats: [screenStats, bindStats],
+    bientot: [screenBientot, () => {}],
     parametres: [() => screenParametres(), bindParametres]
   };
   const [view, bind] = screens[r.name];
   app.innerHTML = view();
   bind();
   window.scrollTo(0, scrollTop);
+  if (r.name === 'cave' && state.cave.jump) {
+    const target = state.cave.jump === 'top' ? null : $$('[data-region]').find((h) => h.dataset.region === state.cave.jump);
+    if (target) target.scrollIntoView();
+    state.cave.jump = '';
+  }
   if (key !== lastRouteKey) {
     const h = app.querySelector('h1');
     if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); }

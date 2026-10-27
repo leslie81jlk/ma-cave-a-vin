@@ -109,6 +109,12 @@ export function sizeLabel(w) {
   return s ? s.label : ml + ' ml';
 }
 
+// Contenance seulement si elle n'est pas standard (750 ml).
+export function sizeNote(w) {
+  const ml = num(w.bottle_size_ml) || 750;
+  return ml === 750 ? '' : sizeLabel(w);
+}
+
 export function colorInfo(w) {
   return COLORS[str(w.color).toLowerCase()] || null;
 }
@@ -137,6 +143,12 @@ export function sortWines(list, key, year) {
   const cmp = {
     region: (a, b) => (isEmpty(str(a.w.region)) - isEmpty(str(b.w.region)))
       || str(a.w.region).localeCompare(str(b.w.region), 'fr') || byName(a, b),
+    producer: (a, b) => (isEmpty(str(a.w.producer)) - isEmpty(str(b.w.producer)))
+      || str(a.w.producer).localeCompare(str(b.w.producer), 'fr') || byName(a, b)
+      || (num(a.w.vintage) || 0) - (num(b.w.vintage) || 0),
+    appellation: (a, b) => (isEmpty(str(a.w.appellation)) - isEmpty(str(b.w.appellation)))
+      || str(a.w.appellation).localeCompare(str(b.w.appellation), 'fr')
+      || str(a.w.producer).localeCompare(str(b.w.producer), 'fr') || byName(a, b),
     score: (a, b) => (isEmpty(num(a.w.personal_score)) - isEmpty(num(b.w.personal_score)))
       || (num(b.w.personal_score) || 0) - (num(a.w.personal_score) || 0) || byName(a, b),
     maturity: (a, b) => (isEmpty(a.m.rank) - isEmpty(b.m.rank)) || b.m.rank - a.m.rank || byName(a, b),
@@ -183,7 +195,10 @@ export function stats(list, year) {
     .map(([k, n]) => ({ label: k || unknownLabel, n, unknown: !k }))
     .sort((a, b) => (a.unknown - b.unknown) || b.n - a.n);
   const countries = toRows(countBy(inStock, (w) => str(w.country)), 'Non renseigné');
-  let regions = toRows(countBy(inStock, (w) => str(w.region)), 'Non renseigné');
+  const regionCountry = new Map();
+  inStock.forEach((w) => { if (str(w.region) && !regionCountry.has(str(w.region))) regionCountry.set(str(w.region), str(w.country)); });
+  let regions = toRows(countBy(inStock, (w) => str(w.region)), 'Non renseigné')
+    .map((r) => ({ ...r, country: r.unknown ? '' : regionCountry.get(r.label) || '' }));
   if (regions.length > 6) {
     const known = regions.filter((r) => !r.unknown);
     const top = known.slice(0, 5);
