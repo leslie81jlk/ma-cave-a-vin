@@ -6,7 +6,8 @@ export const COLUMNS = [
   'purchase_price', 'purchase_currency', 'personal_score', 'personal_notes', 'photo_file',
   'country', 'region', 'subregion', 'appellation', 'color', 'grapes', 'description_fr',
   'drinking_window_start', 'drinking_window_end', 'maturity_confidence', 'maturity_basis',
-  'maturity_reviewed_at', 'claude_note', 'market_price', 'market_price_sources', 'market_price_date'
+  'maturity_reviewed_at', 'claude_note', 'market_price', 'market_price_sources', 'market_price_date',
+  'vivino_score', 'vivino_count', 'vivino_basis', 'vivino_date'
 ];
 
 export const USER_FIELDS = [
@@ -21,7 +22,7 @@ export const CLAUDE_EDITABLE = [
 ];
 
 export const NUMERIC_FIELDS = ['vintage', 'bottle_size_ml', 'current_quantity', 'purchase_price',
-  'personal_score', 'drinking_window_start', 'drinking_window_end', 'market_price'];
+  'personal_score', 'drinking_window_start', 'drinking_window_end', 'market_price', 'vivino_score', 'vivino_count'];
 
 export const COLORS = {
   rouge: { label: 'Rouge', tint: '#B8475E' },
