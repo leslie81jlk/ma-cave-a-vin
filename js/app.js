@@ -4,7 +4,7 @@ import * as L from './logic.js';
 import * as S from './sync.js';
 import * as SC from './scans.js';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
 
@@ -580,6 +580,7 @@ function screenFiche(id) {
   const info = [
     ['Pays', w.country], ['Région', w.region], ['Sous-région', w.subregion], ['Appellation', w.appellation],
     ['Prix d\'achat', L.fmtPrice(w.purchase_price) ? `${L.fmtPrice(w.purchase_price)} ${esc(w.purchase_currency || 'EUR')} / bt` : ''],
+    ['Prix du marché', L.num(w.market_price) ? `~${Math.round(L.num(w.market_price))} EUR / bt` : ''],
     ['Contenance', L.sizeNote(w)]
   ].filter(([, v]) => L.str(v));
   const producer = L.str(w.producer);
@@ -607,6 +608,7 @@ function screenFiche(id) {
     <section class="card" aria-labelledby="info-h">
       <h2 class="h2" id="info-h">Informations</h2>
       ${info.length ? `<dl class="info">${info.map(([k, v]) => `<div><dt>${k}</dt><dd>${k === 'Prix d\'achat' ? v : esc(v)}</dd></div>`).join('')}</dl>` : ''}
+      ${L.num(w.market_price) && L.str(w.market_price_sources) ? `<p class="tiny muted" style="margin:-4px 0 0">Prix du marché : moyenne de ${esc(w.market_price_sources)}${L.str(w.market_price_date) ? `, ${esc(L.str(w.market_price_date).slice(0, 7))}` : ''}.</p>` : ''}
       ${L.str(w.description_fr) ? `<p class="desc">${esc(w.description_fr)}</p>` : ''}
     </section>
     <section class="card" aria-labelledby="avis-h">
@@ -1277,6 +1279,7 @@ function screenStats() {
       <div class="kpi"><b>${st.wines}</b><span>vins</span></div>
       <a class="kpi link" href="#/bientot"><b style="color:var(--accent)">${st.soon}</b><span>à ouvrir bientôt</span></a>
     </div>
+    ${st.value ? `<div class="kpi"><b>${st.value.toLocaleString('fr-FR')} €</b><span>valeur estimée de la cave${st.valued < st.bottles ? ` (${st.valued} bouteilles sur ${st.bottles})` : ''}</span></div>` : ''}
     ${body}
   </div>`;
 }

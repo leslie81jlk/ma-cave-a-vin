@@ -6,7 +6,7 @@ export const COLUMNS = [
   'purchase_price', 'purchase_currency', 'personal_score', 'personal_notes', 'photo_file',
   'country', 'region', 'subregion', 'appellation', 'color', 'grapes', 'description_fr',
   'drinking_window_start', 'drinking_window_end', 'maturity_confidence', 'maturity_basis',
-  'maturity_reviewed_at', 'claude_note'
+  'maturity_reviewed_at', 'claude_note', 'market_price', 'market_price_sources', 'market_price_date'
 ];
 
 export const USER_FIELDS = [
@@ -21,7 +21,7 @@ export const CLAUDE_EDITABLE = [
 ];
 
 export const NUMERIC_FIELDS = ['vintage', 'bottle_size_ml', 'current_quantity', 'purchase_price',
-  'personal_score', 'drinking_window_start', 'drinking_window_end'];
+  'personal_score', 'drinking_window_start', 'drinking_window_end', 'market_price'];
 
 export const COLORS = {
   rouge: { label: 'Rouge', tint: '#B8475E' },
@@ -219,7 +219,13 @@ export function stats(list, year) {
     ['4', 'À boire', '#CC9390'], ['5', 'Sans trop attendre', '#E4AE93'], ['beyond', 'Au-delà de la fenêtre', '#F0C27A'],
     ['0', 'À estimer', '#6E5878']
   ].map(([k, label, c]) => ({ label, c, n: matMap.get(k) || 0 })).filter((r) => r.n > 0);
-  return { bottles, wines: inStock.length, soon, countries, regions, colors, maturity: maturityRows };
+  // Wartość piwnicy: cena rynkowa, a gdy jej brak, cena zakupu.
+  let value = 0, valued = 0;
+  inStock.forEach((w) => {
+    const p = num(w.market_price) || num(w.purchase_price);
+    if (p) { value += p * qty(w); valued += qty(w); }
+  });
+  return { bottles, wines: inStock.length, soon, countries, regions, colors, maturity: maturityRows, value: Math.round(value), valued };
 }
 
 // Podział 12 butelek na półce według kolorów (metoda największej reszty).
